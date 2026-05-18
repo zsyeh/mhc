@@ -5,7 +5,7 @@
 # Copyright (c) 2026 Eh. All rights reserved.
 # ==========================================
 API="http://127.0.0.1:9090"
-SECRET=""
+SECRET="bushieh"
 AUTH="Authorization: Bearer ${SECRET}"
 TEST_URL="http://www.gstatic.com/generate_204"
 CACHE_FILE="/tmp/mhc_rtt.cache"
