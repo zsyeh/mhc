@@ -1,8 +1,9 @@
 /*******************************************************************************
- * Mihomo CLI Controller (mhc) - Linux Kernel Static Branch Optimization
+ * Mihomo CLI Controller (mhc) - Defensively Hardened & Optimized Version
  * Copyright (c) 2026 Eh. All rights reserved.
  *
- * Architecture Paradigm: __builtin_expect Pipeline Tuning & POSIX Error Matrix
+ * Infrastructure: Static Branch Prediction, Strict Boundary Enforcement,
+ * Type-Safe Multicurl Engine & Level 3 Pipeline Optimization.
  * Dependency: libcurl, cJSON
  * Compile: gcc -O3 main.c -lcurl -lcjson -o mhc
  ******************************************************************************/
@@ -17,7 +18,7 @@
 #include <sys/file.h>
 #include <curl/curl.h>
 #include <cjson/cJSON.h>
-#include <errno.h>  /* Standard Linux error symbols: ENOMEM, EINVAL, EIO */
+#include <errno.h>
 
 /* --- Linux Kernel Style Compiler Optimization Macros --- */
 #define likely(x)      __builtin_expect(!!(x), 1)
@@ -31,6 +32,10 @@
 #define CACHE_TTL 3600
 #define MAX_CONCURRENT_PROBES 20  
 #define TIMEOUT_MS 3000
+
+/* --- Sentinel Constants to Replace Magic Numbers --- */
+#define MHC_RTT_TIMEOUT 999999L
+#define MATRIX_BOUNDS   256
 
 /* --- Global Context Structure --- */
 typedef struct {
@@ -87,7 +92,7 @@ static size_t write_callback(void *contents, size_t size, size_t nmemb, void *us
     HttpBuffer *mem = (HttpBuffer *)userp;
     char *ptr = realloc(mem->payload, mem->size + realsize + 1);
     
-    if (unlikely(!ptr)) return 0; /* Dynamic heap starvation is highly unlikely */
+    if (unlikely(!ptr)) return 0; 
     
     mem->payload = ptr;
     memcpy(&(mem->payload[mem->size]), contents, realsize);
@@ -148,9 +153,9 @@ static void apply_route(MhcContext *ctx, const char *target_node) {
     long status = 0;
     char *raw_proxies = NULL;
     cJSON *root_json = NULL;
-    char *queue[256] = {0};
+    char *queue[MATRIX_BOUNDS] = {0};
     size_t q_head = 0, q_tail = 0;
-    char *visited[256] = {0};
+    char *visited[MATRIX_BOUNDS] = {0};
     size_t visited_count = 0;
 
     raw_proxies = perform_http_request(ctx, "/proxies", "GET", NULL, &status);
@@ -173,6 +178,12 @@ static void apply_route(MhcContext *ctx, const char *target_node) {
         if (unlikely(is_visited(visited, visited_count, current))) {
             free(current);
             continue;
+        }
+        
+        if (unlikely(visited_count >= MATRIX_BOUNDS)) {
+            fprintf(stderr, "\033[1;31m[CRITICAL]\033[0m Visited nodes tracker overflow intercepted.\n");
+            free(current);
+            break;
         }
         visited[visited_count++] = current;
 
@@ -215,7 +226,13 @@ static void apply_route(MhcContext *ctx, const char *target_node) {
                 free(payload_str);
                 curl_free(escaped_group);
 
-                if (likely(strcmp(group_name, "GLOBAL") != 0)) queue[q_tail++] = strdup(group_name);
+                if (likely(strcmp(group_name, "GLOBAL") != 0)) {
+                    if (unlikely(q_tail >= MATRIX_BOUNDS)) {
+                        fprintf(stderr, "\033[1;31m[CRITICAL]\033[0m BFS Queue boundary overrun blocked.\n");
+                        break;
+                    }
+                    queue[q_tail++] = strdup(group_name);
+                }
             }
         }
         if (unlikely(!parent_found && is_first_tier)) {
@@ -248,7 +265,7 @@ static void run_race(MhcContext *ctx, cJSON *nodes_array) {
     ProbeResult *results = malloc(sizeof(ProbeResult) * total_nodes);
 
     for (size_t i = 0; i < total_nodes; i++) {
-        results[i].delay = 999999;
+        results[i].delay = MHC_RTT_TIMEOUT;
         cJSON *item = cJSON_GetArrayItem(nodes_array, i);
         node_names[i] = strdup(item->valuestring);
         buffers[i].payload = malloc(1);
@@ -266,7 +283,9 @@ static void run_race(MhcContext *ctx, cJSON *nodes_array) {
         curl_easy_setopt(easy_handles[i], CURLOPT_HTTPHEADER, headers);
         curl_easy_setopt(easy_handles[i], CURLOPT_WRITEFUNCTION, write_callback);
         curl_easy_setopt(easy_handles[i], CURLOPT_WRITEDATA, &buffers[i]);
-        curl_easy_setopt(easy_handles[i], CURLOPT_PRIVATE, (void *)i);
+        
+        /* Context Cast: Cast size_t index safely into the value of the generic pointer space */
+        curl_easy_setopt(easy_handles[i], CURLOPT_PRIVATE, (void *)(size_t)i);
         curl_easy_setopt(easy_handles[i], CURLOPT_TIMEOUT_MS, (long)(TIMEOUT_MS + 500));
         curl_multi_add_handle(multi_handle, easy_handles[i]);
     }
@@ -282,9 +301,13 @@ static void run_race(MhcContext *ctx, cJSON *nodes_array) {
     CURLMsg *msg = NULL;
     while ((msg = curl_multi_info_read(multi_handle, &msgs_left))) {
         if (unlikely(msg->msg != CURLMSG_DONE)) continue;
-        size_t idx = 0;
-        curl_easy_getinfo(msg->easy_handle, CURLINFO_PRIVATE, &idx);
-        strcpy(results[idx].node_name, node_names[idx]);
+        
+        /* Mandatory Fix: Read the token as an aligned pointer first, then unpack its address value */
+        char *private_val = NULL;
+        curl_easy_getinfo(msg->easy_handle, CURLINFO_PRIVATE, &private_val);
+        size_t idx = (size_t)private_val;
+        
+        snprintf(results[idx].node_name, sizeof(results[idx].node_name), "%s", node_names[idx]);
 
         if (likely(msg->data.result == CURLE_OK)) {
             cJSON *res_json = cJSON_Parse(buffers[idx].payload);
@@ -304,7 +327,7 @@ static void run_race(MhcContext *ctx, cJSON *nodes_array) {
         printf("--- Latency Matrix Results ---\n");
         for (size_t i = 0; i < total_nodes; i++) {
             fprintf(fp, "%ld|%ld|%s\n", now, results[i].delay, results[i].node_name);
-            if (unlikely(results[i].delay >= 999999)) printf("  - %s: \033[1;31mTimeout\033[0m\n", results[i].node_name);
+            if (unlikely(results[i].delay >= MHC_RTT_TIMEOUT)) printf("  - %s: \033[1;31mTimeout\033[0m\n", results[i].node_name);
             else printf("  - %s: \033[1;32m%ldms\033[0m\n", results[i].node_name, results[i].delay);
         }
         flock(fd, LOCK_UN);
@@ -428,7 +451,7 @@ static int do_use(MhcContext *ctx, int argc, char **argv) {
     if (unlikely(!proxies)) { cJSON_Delete(root_json); return -ENODATA; }
 
     char *exact_match = NULL;
-    char *fuzzy_matches[256];
+    char *fuzzy_matches[MATRIX_BOUNDS];
     size_t fuzzy_count = 0;
 
     cJSON *proxy_item = NULL;
@@ -439,7 +462,11 @@ static int do_use(MhcContext *ctx, int argc, char **argv) {
             strcmp(node_name, "COMPATIBLE") == 0 || strcmp(node_name, "GLOBAL") == 0) continue;
 
         if (strcmp(node_name, kw) == 0) { exact_match = node_name; break; }
-        if (strcasestr(node_name, kw)) fuzzy_matches[fuzzy_count++] = node_name;
+        
+        if (strcasestr(node_name, kw)) {
+            if (unlikely(fuzzy_count >= MATRIX_BOUNDS)) break; /* Safe Hard-Interception to prevent stack smash */
+            fuzzy_matches[fuzzy_count++] = node_name;
+        }
     }
 
     if (exact_match) { apply_route(ctx, exact_match); goto out_free; }
@@ -448,7 +475,7 @@ static int do_use(MhcContext *ctx, int argc, char **argv) {
 
     printf("\033[1;33m[WARN]\033[0m Matched %zu nodes. Verifying local state cache...\n", fuzzy_count);
     FILE *cp = fopen(CACHE_FILE, "r");
-    char best_node[256] = ""; long best_delay = 999999;
+    char best_node[256] = ""; long best_delay = MHC_RTT_TIMEOUT;
     
     if (likely(cp)) {
         char line[512]; time_t now = time(NULL);
@@ -461,14 +488,15 @@ static int do_use(MhcContext *ctx, int argc, char **argv) {
 
             for (size_t m = 0; m < fuzzy_count; m++) {
                 if (strcmp(fuzzy_matches[m], cname) == 0 && now - ctime <= CACHE_TTL && cdelay < best_delay) {
-                    best_delay = cdelay; strcpy(best_node, cname);
+                    best_delay = cdelay; 
+                    snprintf(best_node, sizeof(best_node), "%s", cname); /* Implemented safe snprintf */
                 }
             }
         }
         fclose(cp);
     }
 
-    if (strlen(best_node) > 0 && best_delay < 999999) {
+    if (strlen(best_node) > 0 && best_delay < MHC_RTT_TIMEOUT) {
         printf("\033[1;32m[SUCCESS]\033[0m Cache Hit (Optimal): %s (%ldms)\n", best_node, best_delay);
         apply_route(ctx, best_node);
     } else {
@@ -504,7 +532,7 @@ int main(int argc, char **argv) {
     init_context(&ctx);
 
     if (unlikely(argc < 2)) {
-        printf("\033[1;36mMihomo CLI Controller (mhc) [Linux Kernel Optimization Style]\033[0m\nUsage:\n");
+        printf("\033[1;36mMihomo CLI Controller (mhc) [Hardened Release]\033[0m\nUsage:\n");
         for (size_t i = 0; i < CMD_TABLE_SIZE; i++) printf("  mhc %-10s # %s\n", cmd_table[i].cmd_name, cmd_table[i].help_meta);
         return 1;
     }
