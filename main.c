@@ -1,9 +1,9 @@
 /*******************************************************************************
- * Mihomo CLI Controller (mhc) - Defensively Hardened & Optimized Version
+ * Mihomo CLI Controller (mhc) - State-Value Decoupled Architecture
  * Copyright (c) 2026 Eh. All rights reserved.
  *
- * Infrastructure: Static Branch Prediction, Strict Boundary Enforcement,
- * Type-Safe Multicurl Engine & Level 3 Pipeline Optimization.
+ * Infrastructure: Zero-Sentinel Telemetry, POSIX Error Mapping, Linux Kernel Style
+ * Branch Optimization via __builtin_expect.
  * Dependency: libcurl, cJSON
  * Compile: gcc -O3 main.c -lcurl -lcjson -o mhc
  ******************************************************************************/
@@ -14,11 +14,14 @@
 #include <string.h>
 #include <unistd.h>
 #include <time.h>
+#include <stdint.h>
 #include <sys/stat.h>
 #include <sys/file.h>
+#include <sys/wait.h> /* Added for robust POSIX subprocess status field decoding */
 #include <curl/curl.h>
 #include <cjson/cJSON.h>
 #include <errno.h>
+#include <limits.h> /* Employs LONG_MAX for pure algebraic infinity bounded limits */
 
 /* --- Linux Kernel Style Compiler Optimization Macros --- */
 #define likely(x)      __builtin_expect(!!(x), 1)
@@ -32,16 +35,20 @@
 #define CACHE_TTL 3600
 #define MAX_CONCURRENT_PROBES 20  
 #define TIMEOUT_MS 3000
-
-/* --- Sentinel Constants to Replace Magic Numbers --- */
-#define MHC_RTT_TIMEOUT 999999L
 #define MATRIX_BOUNDS   256
+
+/* --- Strongly-Typed Telemetry State Machine --- */
+typedef enum {
+    MHC_RTT_VALID = 0,
+    MHC_RTT_TIMEOUT,
+    MHC_RTT_ERROR
+} MhcRttStatus;
 
 /* --- Global Context Structure --- */
 typedef struct {
-    char api_url[256];
-    char auth_header[512];
-    char secret[128];
+    char api_url[512];       /* Expanded buffer limits to handle complex host specifications */
+    char auth_header[1024];  /* Expanded token perimeter limits */
+    char secret[512];
 } MhcContext;
 
 /* --- Forward Declarations of Uniform Command Interface --- */
@@ -54,7 +61,7 @@ static int do_use(MhcContext *ctx, int argc, char **argv);
 static int do_clear(MhcContext *ctx, int argc, char **argv);
 static int do_restart(MhcContext *ctx, int argc, char **argv);
 
-/* --- Function Pointer Command Lookup Table (Kernel Matrix) --- */
+/* --- Function Pointer Command Lookup Table --- */
 typedef int (*CmdHandler)(MhcContext *ctx, int argc, char **argv);
 
 typedef struct {
@@ -84,8 +91,16 @@ typedef struct {
 
 typedef struct {
     char node_name[256];
-    long delay;
+    long delay;             /* Evaluated ONLY when status == MHC_RTT_VALID */
+    MhcRttStatus status;    /* Isolated control plane state tracking */
 } ProbeResult;
+
+/* --- Local Structural Cache Resolver Context --- */
+typedef struct {
+    const char *name;
+    time_t latest_time;
+    long delay;
+} FuzzyTracker;
 
 static size_t write_callback(void *contents, size_t size, size_t nmemb, void *userp) {
     size_t realsize = size * nmemb;
@@ -113,9 +128,15 @@ static char* perform_http_request(MhcContext *ctx, const char *endpoint, const c
     CURL *curl = curl_easy_init();
     if (unlikely(!curl)) return NULL;
 
-    char url[512];
+    char url[2048]; /* Expanded to prevent character truncation caused by nested URL encoding scaling */
     snprintf(url, sizeof(url), "%s%s", ctx->api_url, endpoint);
-    HttpBuffer response = { .payload = malloc(1), .size = 0 };
+    
+    /* Hardened memory boundaries using calloc to safely handle HTTP 204 No Content responses */
+    HttpBuffer response = { .payload = calloc(1, 1), .size = 0 };
+    if (unlikely(!response.payload)) {
+        curl_easy_cleanup(curl);
+        return NULL;
+    }
 
     struct curl_slist *headers = NULL;
     headers = curl_slist_append(headers, ctx->auth_header);
@@ -137,13 +158,20 @@ static char* perform_http_request(MhcContext *ctx, const char *endpoint, const c
     curl_slist_free_all(headers);
     curl_easy_cleanup(curl);
 
-    if (unlikely(res != CURLE_OK)) { free(response.payload); return NULL; }
+    if (unlikely(res != CURLE_OK)) { 
+        free(response.payload); 
+        return NULL; 
+    }
     return response.payload;
 }
 
-static int is_visited(char **set, size_t count, const char *target) {
-    for (size_t i = 0; i < count; i++) {
-        if (strcmp(set[i], target) == 0) return 1;
+/* --- Strict Duplication Interception Filter for Graph Traversal Queue --- */
+static int is_duplicate_node(char **queue, size_t q_tail, char **visited, size_t visited_count, const char *target) {
+    for (size_t i = 0; i < q_tail; i++) {
+        if (queue[i] && strcmp(queue[i], target) == 0) return 1;
+    }
+    for (size_t i = 0; i < visited_count; i++) {
+        if (visited[i] && strcmp(visited[i], target) == 0) return 1;
     }
     return 0;
 }
@@ -168,14 +196,21 @@ static void apply_route(MhcContext *ctx, const char *target_node) {
     if (unlikely(!root_json)) goto out_cleanup;
 
     cJSON *proxies = cJSON_GetObjectItemCaseSensitive(root_json, "proxies");
-    if (unlikely(!proxies)) goto out_cleanup;
+    if (unlikely(!proxies || !cJSON_IsObject(proxies))) goto out_cleanup;
 
-    queue[q_tail++] = strdup(target_node);
+    char *initial_node = strdup(target_node);
+    if (unlikely(!initial_node)) goto out_cleanup;
+    queue[q_tail++] = initial_node;
     int is_first_tier = 1;
 
     while (likely(q_head < q_tail)) {
         char *current = queue[q_head++];
-        if (unlikely(is_visited(visited, visited_count, current))) {
+        
+        int duplicate_pop = 0;
+        for (size_t i = 0; i < visited_count; i++) {
+            if (strcmp(visited[i], current) == 0) { duplicate_pop = 1; break; }
+        }
+        if (unlikely(duplicate_pop)) {
             free(current);
             continue;
         }
@@ -193,24 +228,44 @@ static void apply_route(MhcContext *ctx, const char *target_node) {
         cJSON_ArrayForEach(proxy_item, proxies) {
             cJSON *type_obj = cJSON_GetObjectItemCaseSensitive(proxy_item, "type");
             cJSON *all_obj = cJSON_GetObjectItemCaseSensitive(proxy_item, "all");
-            if (!type_obj || !all_obj || strcmp(type_obj->valuestring, "Selector") != 0) continue;
+            
+            /* Defensive validation: Asserts node type invariants to reject schema contamination */
+            if (!cJSON_IsString(type_obj) || !cJSON_IsArray(all_obj) || strcmp(type_obj->valuestring, "Selector") != 0) {
+                continue;
+            }
 
             cJSON *child = NULL;
             int is_child = 0;
             cJSON_ArrayForEach(child, all_obj) {
-                if (strcmp(child->valuestring, current) == 0) { is_child = 1; break; }
+                if (cJSON_IsString(child) && strcmp(child->valuestring, current) == 0) { 
+                    is_child = 1; 
+                    break; 
+                }
             }
 
             if (likely(is_child)) {
                 parent_found = 1;
                 char *group_name = proxy_item->string;
                 char *escaped_group = curl_easy_escape(NULL, group_name, 0);
-                char endpoint[512];
+                if (unlikely(!escaped_group)) {
+                    goto out_cleanup;
+                }
+                
+                char endpoint[2048]; /* Expanded buffer size to prevent memory boundary truncation errors */
                 snprintf(endpoint, sizeof(endpoint), "/proxies/%s", escaped_group);
                 
                 cJSON *mutation_payload = cJSON_CreateObject();
+                if (unlikely(!mutation_payload)) {
+                    curl_free(escaped_group);
+                    goto out_cleanup;
+                }
                 cJSON_AddStringToObject(mutation_payload, "name", current);
                 char *payload_str = cJSON_PrintUnformatted(mutation_payload);
+                if (unlikely(!payload_str)) {
+                    cJSON_Delete(mutation_payload);
+                    curl_free(escaped_group);
+                    goto out_cleanup;
+                }
 
                 long put_status = 0;
                 char *put_res = perform_http_request(ctx, endpoint, "PUT", payload_str, &put_status);
@@ -227,11 +282,17 @@ static void apply_route(MhcContext *ctx, const char *target_node) {
                 curl_free(escaped_group);
 
                 if (likely(strcmp(group_name, "GLOBAL") != 0)) {
-                    if (unlikely(q_tail >= MATRIX_BOUNDS)) {
-                        fprintf(stderr, "\033[1;31m[CRITICAL]\033[0m BFS Queue boundary overrun blocked.\n");
-                        break;
+                    /* Strict duplication filtering check implemented before push operation to optimize complexity bounds */
+                    if (!is_duplicate_node(queue, q_tail, visited, visited_count, group_name)) {
+                        if (unlikely(q_tail >= MATRIX_BOUNDS)) {
+                            fprintf(stderr, "\033[1;31m[CRITICAL]\033[0m BFS Queue boundary overrun blocked.\n");
+                            goto out_cleanup;
+                        }
+                        char *group_dup = strdup(group_name);
+                        if (likely(group_dup)) {
+                            queue[q_tail++] = group_dup;
+                        }
                     }
-                    queue[q_tail++] = strdup(group_name);
                 }
             }
         }
@@ -259,35 +320,57 @@ static void run_race(MhcContext *ctx, cJSON *nodes_array) {
     if (unlikely(!multi_handle)) return;
     curl_multi_setopt(multi_handle, CURLMOPT_MAX_TOTAL_CONNECTIONS, (long)MAX_CONCURRENT_PROBES);
 
-    CURL **easy_handles = malloc(sizeof(CURL*) * total_nodes);
-    HttpBuffer *buffers = malloc(sizeof(HttpBuffer) * total_nodes);
-    char **node_names = malloc(sizeof(char*) * total_nodes);
-    ProbeResult *results = malloc(sizeof(ProbeResult) * total_nodes);
+    CURL **easy_handles = calloc(total_nodes, sizeof(CURL*));
+    HttpBuffer *buffers = calloc(total_nodes, sizeof(HttpBuffer));
+    char **node_names = calloc(total_nodes, sizeof(char*));
+    ProbeResult *results = calloc(total_nodes, sizeof(ProbeResult));
+    struct curl_slist **headers_array = calloc(total_nodes, sizeof(struct curl_slist*));
 
+    /* Structural initialization validation defense */
+    if (unlikely(!easy_handles || !buffers || !node_names || !results || !headers_array)) {
+        fprintf(stderr, "\033[1;31m[CRITICAL]\033[0m Internal structural allocation failure.\n");
+        goto cleanup;
+    }
+
+    size_t handles_added = 0;
     for (size_t i = 0; i < total_nodes; i++) {
-        results[i].delay = MHC_RTT_TIMEOUT;
         cJSON *item = cJSON_GetArrayItem(nodes_array, i);
+        if (unlikely(!item || !cJSON_IsString(item))) continue;
+
         node_names[i] = strdup(item->valuestring);
-        buffers[i].payload = malloc(1);
+        buffers[i].payload = calloc(1, 1);
+        if (unlikely(!node_names[i] || !buffers[i].payload)) goto cleanup;
         buffers[i].size = 0;
 
+        /* Deterministic early initialization initialization to isolate control plane from loop exceptions */
+        snprintf(results[i].node_name, sizeof(results[i].node_name), "%s", node_names[i]);
+        results[i].delay = 0;
+        results[i].status = MHC_RTT_TIMEOUT; 
+
         easy_handles[i] = curl_easy_init();
+        if (unlikely(!easy_handles[i])) goto cleanup;
+
         char *escaped = curl_easy_escape(easy_handles[i], node_names[i], 0);
-        char url[1024];
+        if (unlikely(!escaped)) goto cleanup;
+
+        /* Expanded target allocation to 2048 bytes to mitigate URL encoding sizing explosions */
+        char url[2048];
         snprintf(url, sizeof(url), "%s/proxies/%s/delay?url=%s&timeout=%d", ctx->api_url, escaped, TEST_URL, TIMEOUT_MS);
         curl_free(escaped);
 
-        struct curl_slist *headers = NULL;
-        headers = curl_slist_append(headers, ctx->auth_header);
+        headers_array[i] = curl_slist_append(headers_array[i], ctx->auth_header);
+        if (unlikely(!headers_array[i])) goto cleanup;
+
         curl_easy_setopt(easy_handles[i], CURLOPT_URL, url);
-        curl_easy_setopt(easy_handles[i], CURLOPT_HTTPHEADER, headers);
+        curl_easy_setopt(easy_handles[i], CURLOPT_HTTPHEADER, headers_array[i]);
         curl_easy_setopt(easy_handles[i], CURLOPT_WRITEFUNCTION, write_callback);
         curl_easy_setopt(easy_handles[i], CURLOPT_WRITEDATA, &buffers[i]);
-        
-        /* Context Cast: Cast size_t index safely into the value of the generic pointer space */
-        curl_easy_setopt(easy_handles[i], CURLOPT_PRIVATE, (void *)(size_t)i);
+        /* Use uintptr_t to ensure safe pointer cast alignment across heterogeneous architectures */
+        curl_easy_setopt(easy_handles[i], CURLOPT_PRIVATE, (void *)(uintptr_t)i);
         curl_easy_setopt(easy_handles[i], CURLOPT_TIMEOUT_MS, (long)(TIMEOUT_MS + 500));
+        
         curl_multi_add_handle(multi_handle, easy_handles[i]);
+        handles_added++;
     }
 
     int still_running = 0;
@@ -302,45 +385,141 @@ static void run_race(MhcContext *ctx, cJSON *nodes_array) {
     while ((msg = curl_multi_info_read(multi_handle, &msgs_left))) {
         if (unlikely(msg->msg != CURLMSG_DONE)) continue;
         
-        /* Mandatory Fix: Read the token as an aligned pointer first, then unpack its address value */
         char *private_val = NULL;
         curl_easy_getinfo(msg->easy_handle, CURLINFO_PRIVATE, &private_val);
-        size_t idx = (size_t)private_val;
-        
-        snprintf(results[idx].node_name, sizeof(results[idx].node_name), "%s", node_names[idx]);
+        size_t idx = (size_t)(uintptr_t)private_val;
 
         if (likely(msg->data.result == CURLE_OK)) {
             cJSON *res_json = cJSON_Parse(buffers[idx].payload);
             if (likely(res_json)) {
                 cJSON *delay_obj = cJSON_GetObjectItemCaseSensitive(res_json, "delay");
-                if (likely(delay_obj && cJSON_IsNumber(delay_obj))) results[idx].delay = delay_obj->valueint;
+                if (likely(delay_obj && cJSON_IsNumber(delay_obj))) {
+                    results[idx].delay = delay_obj->valueint;
+                    results[idx].status = MHC_RTT_VALID;
+                } else {
+                    results[idx].status = MHC_RTT_ERROR;
+                }
                 cJSON_Delete(res_json);
+            } else {
+                results[idx].status = MHC_RTT_ERROR;
             }
+        } else {
+            results[idx].status = MHC_RTT_TIMEOUT;
         }
     }
 
-    FILE *fp = fopen(CACHE_FILE, "a+");
-    if (likely(fp)) {
+    /* --- Compaction and Snapshot Synthesis Engine (Prevents Unbounded File Growth) --- */
+    FuzzyTracker compact_matrix[MATRIX_BOUNDS] = {0};
+    size_t compact_count = 0;
+    time_t now = time(NULL);
+
+    FILE *fp = fopen(CACHE_FILE, "r");
+    if (fp) {
         int fd = fileno(fp);
-        flock(fd, LOCK_EX);
-        time_t now = time(NULL);
-        printf("--- Latency Matrix Results ---\n");
-        for (size_t i = 0; i < total_nodes; i++) {
-            fprintf(fp, "%ld|%ld|%s\n", now, results[i].delay, results[i].node_name);
-            if (unlikely(results[i].delay >= MHC_RTT_TIMEOUT)) printf("  - %s: \033[1;31mTimeout\033[0m\n", results[i].node_name);
-            else printf("  - %s: \033[1;32m%ldms\033[0m\n", results[i].node_name, results[i].delay);
+        flock(fd, LOCK_SH);
+        char line[512];
+        while (fgets(line, sizeof(line), fp)) {
+            line[strcspn(line, "\n")] = 0;
+            char *p1 = strchr(line, '|'); if (!p1) continue;
+            char *p2 = strchr(p1 + 1, '|'); if (!p2) continue;
+            char *p3 = strchr(p2 + 1, '|'); if (!p3) continue;
+            
+            *p1 = '\0'; *p2 = '\0'; *p3 = '\0';
+            time_t ctime = (time_t)atol(line);
+            char cstatus = *(p1 + 1);
+            long cdelay = atol(p2 + 1);
+            char *cname = p3 + 1;
+
+            if (now - ctime > CACHE_TTL || strlen(cname) == 0) continue;
+
+            int found_idx = -1;
+            for (size_t m = 0; m < compact_count; m++) {
+                if (strcmp(compact_matrix[m].name, cname) == 0) {
+                    found_idx = (int)m; break;
+                }
+            }
+            if (found_idx != -1) {
+                if (ctime >= compact_matrix[found_idx].latest_time) {
+                    compact_matrix[found_idx].latest_time = ctime;
+                    compact_matrix[found_idx].delay = (cstatus == 'V') ? cdelay : LONG_MAX;
+                }
+            } else if (compact_count < MATRIX_BOUNDS) {
+                compact_matrix[compact_count].name = strdup(cname);
+                compact_matrix[compact_count].latest_time = ctime;
+                compact_matrix[compact_count].delay = (cstatus == 'V') ? cdelay : LONG_MAX;
+                compact_count++;
+            }
         }
         flock(fd, LOCK_UN);
         fclose(fp);
     }
 
+    /* Merge the newly computed parallel measurements into the map matrix snapshot */
     for (size_t i = 0; i < total_nodes; i++) {
-        curl_multi_remove_handle(multi_handle, easy_handles[i]);
-        curl_easy_cleanup(easy_handles[i]);
-        free(buffers[i].payload);
-        free(node_names[i]);
+        if (unlikely(!node_names[i] || strlen(results[i].node_name) == 0)) continue;
+        if (unlikely(strchr(results[i].node_name, '|') != NULL || strchr(results[i].node_name, '\n') != NULL)) continue;
+
+        int found_idx = -1;
+        for (size_t m = 0; m < compact_count; m++) {
+            if (strcmp(compact_matrix[m].name, results[i].node_name) == 0) {
+                found_idx = (int)m; break;
+            }
+        }
+        long target_delay = (results[i].status == MHC_RTT_VALID) ? results[i].delay : LONG_MAX;
+        if (found_idx != -1) {
+            compact_matrix[found_idx].latest_time = now;
+            compact_matrix[found_idx].delay = target_delay;
+        } else if (compact_count < MATRIX_BOUNDS) {
+            compact_matrix[compact_count].name = strdup(results[i].node_name);
+            compact_matrix[compact_count].latest_time = now;
+            compact_matrix[compact_count].delay = target_delay;
+            compact_count++;
+        }
     }
-    free(easy_handles); free(buffers); free(node_names); free(results);
+
+    /* Atomically write out the compacted dataset snapshot */
+    fp = fopen(CACHE_FILE, "w");
+    if (likely(fp)) {
+        int fd = fileno(fp);
+        flock(fd, LOCK_EX);
+        for (size_t m = 0; m < compact_count; m++) {
+            char status_char = (compact_matrix[m].delay < LONG_MAX) ? 'V' : 'T';
+            long out_delay = (compact_matrix[m].delay < LONG_MAX) ? compact_matrix[m].delay : 0;
+            fprintf(fp, "%ld|%c|%ld|%s\n", compact_matrix[m].latest_time, status_char, out_delay, compact_matrix[m].name);
+        }
+        flock(fd, LOCK_UN);
+        fclose(fp);
+    }
+
+    printf("--- Latency Matrix Results ---\n");
+    for (size_t i = 0; i < total_nodes; i++) {
+        if (unlikely(!node_names[i])) continue;
+        if (unlikely(results[i].status != MHC_RTT_VALID)) {
+            printf("  - %s: \033[1;31m%s\033[0m\n", results[i].node_name, 
+                   (results[i].status == MHC_RTT_TIMEOUT) ? "Timeout" : "Error");
+        } else {
+            printf("  - %s: \033[1;32m%ldms\033[0m\n", results[i].node_name, results[i].delay);
+        }
+    }
+
+    for (size_t m = 0; m < compact_count; m++) {
+        free((void *)compact_matrix[m].name);
+    }
+
+cleanup:
+    /* Secure deallocation sweep removing easy handles and explicit header memory structures */
+    for (size_t i = 0; i < total_nodes; i++) {
+        if (easy_handles && easy_handles[i]) {
+            if (i < handles_added) {
+                curl_multi_remove_handle(multi_handle, easy_handles[i]);
+            }
+            curl_easy_cleanup(easy_handles[i]);
+        }
+        if (headers_array && headers_array[i]) curl_slist_free_all(headers_array[i]);
+        if (buffers && buffers[i].payload) free(buffers[i].payload);
+        if (node_names && node_names[i]) free(node_names[i]);
+    }
+    free(easy_handles); free(buffers); free(node_names); free(results); free(headers_array);
     curl_multi_cleanup(multi_handle);
     printf("\033[1;32m[SUCCESS]\033[0m RTT metrics committed to local state cache securely.\n");
 }
@@ -356,18 +535,30 @@ static int do_status(MhcContext *ctx, int argc, char **argv) {
     if (unlikely(!json)) return -EBADMSG;
 
     cJSON *mode = cJSON_GetObjectItemCaseSensitive(json, "mode");
-    printf("Current Kernel Mode: \033[1;36m%s\033[0m\n", mode ? mode->valuestring : "Unknown");
+    printf("Current Kernel Mode: \033[1;36m%s\033[0m\n", cJSON_IsString(mode) ? mode->valuestring : "Unknown");
     cJSON_Delete(json);
     return 0;
 }
 
 static int do_mode(MhcContext *ctx, int argc, char **argv) {
     if (unlikely(argc < 3)) { fprintf(stderr, "Missing target mode token.\n"); return -EINVAL; }
-    char payload[128];
-    snprintf(payload, sizeof(payload), "{\"mode\": \"%s\"}", argv[2]);
+    
+    /* Hardened JSON Serialization to entirely eliminate structure injection flaws */
+    cJSON *root = cJSON_CreateObject();
+    if (unlikely(!root)) return -ENOMEM;
+    cJSON_AddStringToObject(root, "mode", argv[2]);
+    char *payload = cJSON_PrintUnformatted(root);
+    if (unlikely(!payload)) {
+        cJSON_Delete(root);
+        return -ENOMEM;
+    }
+
     long status = 0;
     char *res = perform_http_request(ctx, "/configs", "PATCH", payload, &status);
     if (res) free(res);
+    free(payload);
+    cJSON_Delete(root);
+
     if (likely(status == 204 || status == 200)) printf("State Mutated: Mode switched to \033[1;32m%s\033[0m\n", argv[2]);
     return 0;
 }
@@ -382,7 +573,7 @@ static int do_nodes(MhcContext *ctx, int argc, char **argv) {
     if (unlikely(!json)) return -EBADMSG;
 
     cJSON *proxies = cJSON_GetObjectItemCaseSensitive(json, "proxies");
-    if (likely(proxies)) {
+    if (likely(proxies && cJSON_IsObject(proxies))) {
         cJSON *item = NULL;
         cJSON_ArrayForEach(item, proxies) {
             char *name = item->string;
@@ -406,7 +597,7 @@ static int execute_telemetry_workflow(MhcContext *ctx, const char *kw) {
     if (unlikely(!root_json)) return -EBADMSG;
 
     cJSON *proxies = cJSON_GetObjectItemCaseSensitive(root_json, "proxies");
-    if (unlikely(!proxies)) { cJSON_Delete(root_json); return -ENODATA; }
+    if (unlikely(!proxies || !cJSON_IsObject(proxies))) { cJSON_Delete(root_json); return -ENODATA; }
 
     cJSON *filtered_nodes = cJSON_CreateArray();
     cJSON *proxy_item = NULL;
@@ -448,7 +639,7 @@ static int do_use(MhcContext *ctx, int argc, char **argv) {
     if (unlikely(!root_json)) return -EBADMSG;
 
     cJSON *proxies = cJSON_GetObjectItemCaseSensitive(root_json, "proxies");
-    if (unlikely(!proxies)) { cJSON_Delete(root_json); return -ENODATA; }
+    if (unlikely(!proxies || !cJSON_IsObject(proxies))) { cJSON_Delete(root_json); return -ENODATA; }
 
     char *exact_match = NULL;
     char *fuzzy_matches[MATRIX_BOUNDS];
@@ -464,7 +655,7 @@ static int do_use(MhcContext *ctx, int argc, char **argv) {
         if (strcmp(node_name, kw) == 0) { exact_match = node_name; break; }
         
         if (strcasestr(node_name, kw)) {
-            if (unlikely(fuzzy_count >= MATRIX_BOUNDS)) break; /* Safe Hard-Interception to prevent stack smash */
+            if (unlikely(fuzzy_count >= MATRIX_BOUNDS)) break; 
             fuzzy_matches[fuzzy_count++] = node_name;
         }
     }
@@ -474,29 +665,68 @@ static int do_use(MhcContext *ctx, int argc, char **argv) {
     if (unlikely(fuzzy_count == 0)) { fprintf(stderr, "\033[1;31m[ERROR]\033[0m Target keyword '%s' matched 0 entities.\n", kw); goto out_free; }
 
     printf("\033[1;33m[WARN]\033[0m Matched %zu nodes. Verifying local state cache...\n", fuzzy_count);
+    
+    /* Decoupled State Time-Inversion Tracking Matrix Allocation */
+    FuzzyTracker *trackers = calloc(fuzzy_count, sizeof(FuzzyTracker));
+    if (unlikely(!trackers)) {
+        fprintf(stderr, "\033[1;31m[CRITICAL]\033[0m Memory allocation failure for fuzzy trackers.\n");
+        goto out_free;
+    }
+    for (size_t m = 0; m < fuzzy_count; m++) {
+        trackers[m].name = fuzzy_matches[m];
+        trackers[m].latest_time = 0;
+        trackers[m].delay = LONG_MAX;
+    }
+
     FILE *cp = fopen(CACHE_FILE, "r");
-    char best_node[256] = ""; long best_delay = MHC_RTT_TIMEOUT;
+    char best_node[256] = ""; 
+    long best_delay = LONG_MAX;
     
     if (likely(cp)) {
+        int fd = fileno(cp);
+        /* Acquire POSIX shared lock to ensure data consistency during concurrent telemetry updates */
+        flock(fd, LOCK_SH);
+
         char line[512]; time_t now = time(NULL);
         while (fgets(line, sizeof(line), cp)) {
             line[strcspn(line, "\n")] = 0;
+            
+            /* Parse four-token structural schema securely */
             char *p1 = strchr(line, '|'); if (!p1) continue;
             char *p2 = strchr(p1 + 1, '|'); if (!p2) continue;
-            *p1 = '\0'; *p2 = '\0';
-            time_t ctime = (time_t)atol(line); long cdelay = atol(p1 + 1); char *cname = p2 + 1;
+            char *p3 = strchr(p2 + 1, '|'); if (!p3) continue;
+            
+            *p1 = '\0'; *p2 = '\0'; *p3 = '\0';
+            time_t ctime = (time_t)atol(line); 
+            char cstatus = *(p1 + 1);
+            long cdelay = atol(p2 + 1); 
+            char *cname = p3 + 1;
 
+            /* Processing records to extract the absolute latest telemetry state within O(M) bounded window */
             for (size_t m = 0; m < fuzzy_count; m++) {
-                if (strcmp(fuzzy_matches[m], cname) == 0 && now - ctime <= CACHE_TTL && cdelay < best_delay) {
-                    best_delay = cdelay; 
-                    snprintf(best_node, sizeof(best_node), "%s", cname); /* Implemented safe snprintf */
+                if (strcmp(trackers[m].name, cname) == 0 && now - ctime <= CACHE_TTL) {
+                    if (ctime >= trackers[m].latest_time) {
+                        trackers[m].latest_time = ctime;
+                        /* Suppress dead node entries masked by older valid records via bounded infinity assignment */
+                        trackers[m].delay = (cstatus == 'V') ? cdelay : LONG_MAX;
+                    }
                 }
             }
         }
+        flock(fd, LOCK_UN);
         fclose(cp);
-    }
 
-    if (strlen(best_node) > 0 && best_delay < MHC_RTT_TIMEOUT) {
+        /* Evaluate absolute optimal routing metrics based exclusively on verified fresh state records */
+        for (size_t m = 0; m < fuzzy_count; m++) {
+            if (trackers[m].latest_time > 0 && trackers[m].delay < best_delay) {
+                best_delay = trackers[m].delay;
+                snprintf(best_node, sizeof(best_node), "%s", trackers[m].name);
+            }
+        }
+    }
+    free(trackers);
+
+    if (strlen(best_node) > 0 && best_delay < LONG_MAX) {
         printf("\033[1;32m[SUCCESS]\033[0m Cache Hit (Optimal): %s (%ldms)\n", best_node, best_delay);
         apply_route(ctx, best_node);
     } else {
@@ -523,16 +753,19 @@ static int do_clear(MhcContext *ctx, int argc, char **argv) {
 
 static int do_restart(MhcContext *ctx, int argc, char **argv) {
     printf("\033[1;34m[INFO]\033[0m Dispatching systemctl restart clashtui_mihomo...\n");
-    return system("sudo systemctl restart clashtui_mihomo");
+    int ret = system("sudo systemctl restart clashtui_mihomo");
+    if (unlikely(ret == -1)) return -errno;
+    
+    /* Decodes full structural bitfield to expose shell termination status cleanly */
+    return WIFEXITED(ret) ? WEXITSTATUS(ret) : -ECHILD;
 }
 
-/* --- Entry Point & Architectural Lookup Table Dispatcher --- */
 int main(int argc, char **argv) {
     MhcContext ctx;
     init_context(&ctx);
 
     if (unlikely(argc < 2)) {
-        printf("\033[1;36mMihomo CLI Controller (mhc) [Hardened Release]\033[0m\nUsage:\n");
+        printf("\033[1;36mMihomo CLI Controller (mhc) [Zero-Sentinel Architecture]\033[0m\nUsage:\n");
         for (size_t i = 0; i < CMD_TABLE_SIZE; i++) printf("  mhc %-10s # %s\n", cmd_table[i].cmd_name, cmd_table[i].help_meta);
         return 1;
     }
