@@ -1,3 +1,5 @@
+"Initiated as a Bash shell script,
+Perfected in pure C—securely hardened and performance-equipped."
 # mhc: A Topologically-Adaptive Graph-Traversal CLI Controller for Mihomo Cores
 
 Copyright (c) 2026 Eh. All rights reserved.
