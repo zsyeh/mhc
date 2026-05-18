@@ -3,7 +3,7 @@
  * Copyright (c) 2026 Eh. All rights reserved.
  *
  * Dependency: libcurl, cJSON
- * Compile: gcc -O3 mhc.c -lcurl -lcjson -o mhc
+ * Compile: gcc -O3 main.c -lcurl -lcjson -o mhc
  ******************************************************************************/
 
 #define _GNU_SOURCE
@@ -23,7 +23,7 @@
 #define TEST_URL "http://www.gstatic.com/generate_204"
 #define CACHE_FILE "/tmp/mhc_rtt.cache"
 #define CACHE_TTL 3600
-#define MAX_CONCURRENT_PROBES 20  /* Bounds network I/O blast radius */
+#define MAX_CONCURRENT_PROBES 20  
 #define TIMEOUT_MS 3000
 
 /* --- Global Context Structure for Environment Decoupling --- */
@@ -45,7 +45,6 @@ typedef struct {
     long delay;
 } ProbeResult;
 
-/* Callback execution for memory buffer buffering */
 static size_t write_callback(void *contents, size_t size, size_t nmemb, void *userp) {
     size_t realsize = size * nmemb;
     HttpBuffer *mem = (HttpBuffer *)userp;
@@ -64,7 +63,6 @@ static size_t write_callback(void *contents, size_t size, size_t nmemb, void *us
     return realsize;
 }
 
-/* Base infrastructure initialization and configuration mapping */
 void init_context(MhcContext *ctx) {
     const char *env_api = getenv("MHC_API");
     const char *env_secret = getenv("MHC_SECRET");
@@ -74,7 +72,6 @@ void init_context(MhcContext *ctx) {
     snprintf(ctx->auth_header, sizeof(ctx->auth_header), "Authorization: Bearer %s", ctx->secret);
 }
 
-/* Synchronous Atomic HTTP REST Engine Wrapper */
 char* perform_http_request(MhcContext *ctx, const char *endpoint, const char *method, const char *json_payload, long *out_status) {
     CURL *curl = curl_easy_init();
     if (!curl) return NULL;
@@ -113,7 +110,6 @@ char* perform_http_request(MhcContext *ctx, const char *endpoint, const char *me
     return response.payload;
 }
 
-/* Safe token verification to eliminate the Bash fuzzy match substring bug */
 int is_visited(char **set, size_t count, const char *target) {
     for (size_t i = 0; i < count; i++) {
         if (strcmp(set[i], target) == 0) return 1;
@@ -140,7 +136,6 @@ void apply_route(MhcContext *ctx, const char *target_node) {
         return;
     }
 
-    /* Queue Allocation for Graph Traversal Traps */
     char *queue[256];
     size_t q_head = 0, q_tail = 0;
     queue[q_tail++] = strdup(target_node);
@@ -158,7 +153,6 @@ void apply_route(MhcContext *ctx, const char *target_node) {
         }
         visited[visited_count++] = current;
 
-        /* Inverse Graph Traversal Pointer Extraction */
         cJSON *proxy_item = NULL;
         int parent_found = 0;
 
@@ -180,7 +174,6 @@ void apply_route(MhcContext *ctx, const char *target_node) {
                     parent_found = 1;
                     char *group_name = proxy_item->string;
                     
-                    /* Executing Atomic Pointer Mutation Payload via PUT */
                     char *escaped_group = curl_easy_escape(NULL, group_name, 0);
                     char endpoint[512];
                     snprintf(endpoint, sizeof(endpoint), "/proxies/%s", escaped_group);
@@ -203,7 +196,6 @@ void apply_route(MhcContext *ctx, const char *target_node) {
                     free(payload_str);
                     curl_free(escaped_group);
 
-                    /* Intercept upward cascade propagation if GLOBAL boundary reached */
                     if (strcmp(group_name, "GLOBAL") != 0) {
                         queue[q_tail++] = strdup(group_name);
                     }
@@ -212,13 +204,12 @@ void apply_route(MhcContext *ctx, const char *target_node) {
         }
 
         if (!parent_found && is_first_tier) {
-            fprintf(stderr, "\033[1;31m[ERROR]\033[0m Topology Isolation: Leaf node contains no valid Selector parents.\n");
+            fprintf(stderr, "\033[1;31m[ERROR]\033[0m Topology Isolation: Leaf node '%s' contains no valid Selector parents.\n", current);
             break;
         }
         is_first_tier = 0;
     }
 
-    /* Absolute Resource Reclamation Matrix */
     for (size_t i = 0; i < visited_count; i++) free(visited[i]);
     while (q_head < q_tail) free(queue[q_head++]);
     cJSON_Delete(root_json);
@@ -234,7 +225,6 @@ void run_race(MhcContext *ctx, cJSON *nodes_array) {
     CURLM *multi_handle = curl_multi_init();
     curl_multi_setopt(multi_handle, CURLMOPT_MAX_TOTAL_CONNECTIONS, (long)MAX_CONCURRENT_PROBES);
 
-    /* Allocate runtime context pointers to track chunks */
     CURL **easy_handles = malloc(sizeof(CURL*) * total_nodes);
     HttpBuffer *buffers = malloc(sizeof(HttpBuffer) * total_nodes);
     char **node_names = malloc(sizeof(char*) * total_nodes);
@@ -264,7 +254,6 @@ void run_race(MhcContext *ctx, cJSON *nodes_array) {
         curl_multi_add_handle(multi_handle, easy_handles[i]);
     }
 
-    /* High Performance Non-Blocking I/O Polling Loop */
     int still_running = 0;
     do {
         CURLMcode mc = curl_multi_perform(multi_handle, &still_running);
@@ -274,7 +263,6 @@ void run_race(MhcContext *ctx, cJSON *nodes_array) {
         if (mc != CURLM_OK) break;
     } while (still_running);
 
-    /* Telemetry Metrics Extraction Phase */
     int msgs_left = 0;
     CURLMsg *msg = NULL;
     ProbeResult *results = malloc(sizeof(ProbeResult) * total_nodes);
@@ -299,11 +287,10 @@ void run_race(MhcContext *ctx, cJSON *nodes_array) {
         }
     }
 
-    /* Commit Telemetry into Thread-Safe Guarded State Cache File System */
     FILE *fp = fopen(CACHE_FILE, "a+");
     if (fp) {
         int fd = fileno(fp);
-        flock(fd, LOCK_EX); /* Mandatory Lock to prevent concurrency hazards */
+        flock(fd, LOCK_EX); 
         time_t now = time(NULL);
         printf("--- Latency Matrix Results ---\n");
         for (size_t i = 0; i < total_nodes; i++) {
@@ -318,7 +305,6 @@ void run_race(MhcContext *ctx, cJSON *nodes_array) {
         fclose(fp);
     }
 
-    /* Release Allocation Pools */
     for (size_t i = 0; i < total_nodes; i++) {
         curl_multi_remove_handle(multi_handle, easy_handles[i]);
         curl_easy_cleanup(easy_handles[i]);
@@ -333,7 +319,6 @@ void run_race(MhcContext *ctx, cJSON *nodes_array) {
     printf("\033[1;32m[SUCCESS]\033[0m RTT metrics committed to local state cache securely.\n");
 }
 
-/* Command execution dispatch entry point */
 int main(int argc, char **argv) {
     if (argc < 2) {
         printf("Mihomo CLI Controller (mhc) written in Optimized C\nUsage: %s <status|mode|nodes|test|testall|use|clear|restart>\n", argv[0]);
@@ -368,10 +353,186 @@ int main(int argc, char **argv) {
         }
         if (res) free(res);
     } 
+    else if (strcmp(argv[1], "nodes") == 0) {
+        long status = 0;
+        char *res = perform_http_request(&ctx, "/proxies", "GET", NULL, &status);
+        if (res && status == 200) {
+            cJSON *json = cJSON_Parse(res);
+            if (json) {
+                cJSON *proxies = cJSON_GetObjectItemCaseSensitive(json, "proxies");
+                if (proxies) {
+                    cJSON *item = NULL;
+                    cJSON_ArrayForEach(item, proxies) {
+                        char *name = item->string;
+                        if (strcmp(name, "DIRECT") != 0 && strcmp(name, "REJECT") != 0 &&
+                            strcmp(name, "REJECT-DROP") != 0 && strcmp(name, "PASS") != 0 &&
+                            strcmp(name, "GLOBAL") != 0 && strcmp(name, "COMPATIBLE") != 0) {
+                            printf("%s\n", name);
+                        }
+                    }
+                }
+                cJSON_Delete(json);
+            }
+        }
+        if (res) free(res);
+    }
+    else if (strcmp(argv[1], "testall") == 0 || strcmp(argv[1], "test") == 0) {
+        int is_test_kw = (strcmp(argv[1], "test") == 0);
+        if (is_test_kw && argc < 3) {
+            fprintf(stderr, "\033[1;31m[ERROR]\033[0m Missing keyword constraint for 'test' execution.\n");
+            curl_global_cleanup();
+            return 1;
+        }
+        const char *kw = is_test_kw ? argv[2] : NULL;
+
+        long status = 0;
+        char *raw_proxies = perform_http_request(&ctx, "/proxies", "GET", NULL, &status);
+        if (!raw_proxies || status != 200) {
+            fprintf(stderr, "\033[1;31m[ERROR]\033[0m Failed to query active nodes from core matrix.\n");
+            if (raw_proxies) free(raw_proxies);
+            curl_global_cleanup();
+            return 1;
+        }
+
+        cJSON *root_json = cJSON_Parse(raw_proxies);
+        free(raw_proxies);
+        if (!root_json) { curl_global_cleanup(); return 1; }
+
+        cJSON *proxies = cJSON_GetObjectItemCaseSensitive(root_json, "proxies");
+        if (!proxies) { cJSON_Delete(root_json); curl_global_cleanup(); return 1; }
+
+        cJSON *filtered_nodes = cJSON_CreateArray();
+        cJSON *proxy_item = NULL;
+        cJSON_ArrayForEach(proxy_item, proxies) {
+            char *node_name = proxy_item->string;
+            if (strcmp(node_name, "DIRECT") == 0 || strcmp(node_name, "REJECT") == 0 ||
+                strcmp(node_name, "REJECT-DROP") == 0 || strcmp(node_name, "PASS") == 0 ||
+                strcmp(node_name, "COMPATIBLE") == 0 || strcmp(node_name, "GLOBAL") == 0) {
+                continue;
+            }
+            if (is_test_kw) {
+                if (!strcasestr(node_name, kw)) continue;
+            }
+            cJSON_AddItemToArray(filtered_nodes, cJSON_CreateString(node_name));
+        }
+
+        if (cJSON_GetArraySize(filtered_nodes) == 0) {
+            fprintf(stderr, "\033[1;31m[ERROR]\033[0m Target constraints matched 0 entities.\n");
+        } else {
+            run_race(&ctx, filtered_nodes);
+        }
+        cJSON_Delete(filtered_nodes);
+        cJSON_Delete(root_json);
+    }
     else if (strcmp(argv[1], "use") == 0) {
-        if (argc < 3) { fprintf(stderr, "Missing Keyword parameter.\n"); return 1; }
-        /* Execute exact target propagation directly */
-        apply_route(&ctx, argv[2]);
+        if (argc < 3) { fprintf(stderr, "Missing Keyword parameter.\n"); curl_global_cleanup(); return 1; }
+        const char *kw = argv[2];
+
+        long status = 0;
+        char *raw_proxies = perform_http_request(&ctx, "/proxies", "GET", NULL, &status);
+        if (!raw_proxies || status != 200) {
+            fprintf(stderr, "\033[1;31m[ERROR]\033[0m Failed to query proxies for routing resolution.\n");
+            if (raw_proxies) free(raw_proxies);
+            curl_global_cleanup();
+            return 1;
+        }
+
+        cJSON *root_json = cJSON_Parse(raw_proxies);
+        free(raw_proxies);
+        if (!root_json) { curl_global_cleanup(); return 1; }
+
+        cJSON *proxies = cJSON_GetObjectItemCaseSensitive(root_json, "proxies");
+        if (!proxies) { cJSON_Delete(root_json); curl_global_cleanup(); return 1; }
+
+        /* --- Keyword Resolution Pipeline --- */
+        char *exact_match = NULL;
+        char *fuzzy_matches[256];
+        size_t fuzzy_count = 0;
+
+        cJSON *proxy_item = NULL;
+        cJSON_ArrayForEach(proxy_item, proxies) {
+            char *node_name = proxy_item->string;
+            if (strcmp(node_name, "DIRECT") == 0 || strcmp(node_name, "REJECT") == 0 ||
+                strcmp(node_name, "REJECT-DROP") == 0 || strcmp(node_name, "PASS") == 0 ||
+                strcmp(node_name, "COMPATIBLE") == 0 || strcmp(node_name, "GLOBAL") == 0) {
+                continue;
+            }
+
+            if (strcmp(node_name, kw) == 0) {
+                exact_match = node_name;
+                break;
+            }
+            if (strcasestr(node_name, kw)) {
+                fuzzy_matches[fuzzy_count++] = node_name;
+            }
+        }
+
+        if (exact_match) {
+            apply_route(&ctx, exact_match);
+        } 
+        else if (fuzzy_count == 1) {
+            apply_route(&ctx, fuzzy_matches[0]);
+        } 
+        else if (fuzzy_count > 1) {
+            printf("\033[1;33m[WARN]\033[0m Matched %zu nodes. Verifying local state cache...\n", fuzzy_count);
+            
+            /* Parse append-only cache to find optimal RTT under 1 hour TTL */
+            FILE *cp = fopen(CACHE_FILE, "r");
+            char best_node[256] = "";
+            long best_delay = 999999;
+            
+            if (cp) {
+                char line[512];
+                time_t now = time(NULL);
+                while (fgets(line, sizeof(line), cp)) {
+                    line[strcspn(line, "\n")] = 0;
+                    char *p1 = strchr(line, '|');
+                    if (!p1) continue;
+                    char *p2 = strchr(p1 + 1, '|');
+                    if (!p2) continue;
+                    *p1 = '\0'; *p2 = '\0';
+                    
+                    time_t ctime = (time_t)atol(line);
+                    long cdelay = atol(p1 + 1);
+                    char *cname = p2 + 1;
+
+                    for (size_t m = 0; m < fuzzy_count; m++) {
+                        if (strcmp(fuzzy_matches[m], cname) == 0) {
+                            if (now - ctime <= CACHE_TTL && cdelay < best_delay) {
+                                best_delay = cdelay;
+                                strcpy(best_node, cname);
+                            }
+                        }
+                    }
+                }
+                fclose(cp);
+            }
+
+            if (strlen(best_node) > 0 && best_delay < 999999) {
+                printf("\033[1;32m[SUCCESS]\033[0m Cache Hit (Optimal): %s (%ldms)\n", best_node, best_delay);
+                apply_route(&ctx, best_node);
+            } else {
+                /* Fallback Matrix: Interactive Dropdown Menu via standard input */
+                printf("\033[1;33m[WARN]\033[0m Cache Miss or Expired (>1 Hour). Manual intervention required.\n");
+                printf("------------------------------------------------------------\n");
+                for (size_t i = 0; i < fuzzy_count; i++) {
+                    printf("%zu) %s\n", i + 1, fuzzy_matches[i]);
+                }
+                printf("\033[1;36mSelect node index to route (Ctrl+C to abort): \033[0m");
+                int choice = 0;
+                if (scanf("%d", &choice) == 1 && choice >= 1 && choice <= (int)fuzzy_count) {
+                    printf("\nYou selected: \033[1;32m%s\033[0m\n", fuzzy_matches[choice - 1]);
+                    apply_route(&ctx, fuzzy_matches[choice - 1]);
+                } else {
+                    printf("\033[1;31mInvalid index.\033[0m\n");
+                }
+            }
+        } 
+        else {
+            fprintf(stderr, "\033[1;31m[ERROR]\033[0m Target keyword '%s' matched 0 entities.\n", kw);
+        }
+
+        cJSON_Delete(root_json);
     }
     else if (strcmp(argv[1], "clear") == 0) {
         unlink(CACHE_FILE);
