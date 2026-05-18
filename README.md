@@ -45,25 +45,20 @@ Commercial subscription profiles frequently present severe structural flaws, gen
 To neutralize the structural chaos of deeply nested provider profiles (extending up to four, five, or arbitrary layer depths), `mhc` implements an **Unbounded Breadth-First Search (BFS) Upward Propagation Algorithm**.
 
 ### Theoretical Derivation
-
 Let the active proxy configuration be modeled as a directed graph $G = (V, E)$, where $V$ represents the set of all proxies and strategy groups, and $E$ represents the directed routing paths. When an operator selects a specific leaf node $v_{\text{target}} \in V$, conventional systems fail if $v_{\text{target}}$ is not explicitly declared within the immediate boundary of the root proxy group $V_{\text{root}}$.
 
 `mhc` resolves this via an automated inverse graph traversal:
 
 1. Let $Q$ be a FIFO queue, initialized with $Q \leftarrow [v_{\text{target}}]$. Let $S$ be a set tracking visited vertices, initialized with $S \leftarrow \emptyset$.
 2. While $Q$ is not empty, dequeue the front element $u$. If $u \in S$, continue to prevent infinite traversal loops. Otherwise, append $u \to S$.
-3. Query the live memory cache of the core using $jq$ to discover all parent groups $P = \{ p \in V \mid u \in \text{children}(p) \land \text{type}(p) = \text{"Selector"} \}$.
+3. Query the live memory cache of the core using `jq` to discover all parent groups $P$, defined as:
+$$P = \{ p \in V \mid u \in \text{children}(p) \land \text{type}(p) = \text{"Selector"} \}$$
 4. For each $p \in P$, dispatch an asynchronous `PUT` mutation payload:
-
-$$\text{Payload} := \{\text{"name"}: u\}$$
-
-
-
-targeting the URI endpoint `/proxies/\text{encode}(p)`. This flashes the internal pointer of $p$ to target $u$.
+$$\text{Payload} := \\{ \text{"name"}: u \\}$$
+targeting the URI endpoint `/proxies/{encode(p)}`. This flashes the internal pointer of $p$ to target $u$.
 5. If $p \neq V_{\text{GLOBAL}}$, enqueue $p \to Q$ to propagate the control signal upstream to the next topological layer.
 
 Through this design, the execution sequence achieves complete convergence over the graph at a time complexity of $O(|V| + |E|)$. It systematically heals path fragmentation across any arbitrary configuration depth without requiring manual adjustments to the underlying file profile.
-
 ---
 
 ## 4. Technical Specifications & Dependencies
